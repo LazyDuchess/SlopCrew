@@ -22,12 +22,6 @@ public class NetworkService : BackgroundService {
     private Dictionary<int, List<PositionUpdate>> queuedPositionUpdates = new();
     private Dictionary<int, List<VisualUpdate>> queuedVisualUpdates = new();
     private Dictionary<int, List<AnimationUpdate>> queuedAnimationUpdates = new();
-    private Queue<(uint, ServerboundMessage)> packetQueue = new();
-
-    private CancellationTokenSource packetCts = new();
-    private Task? packetTask;
-    private const int MaxMessages = 256;
-    private NetworkingMessage[] messages = new NetworkingMessage[MaxMessages];
 
     public List<NetworkClient> Clients => this.clients.Values.ToList();
 
@@ -64,24 +58,11 @@ public class NetworkService : BackgroundService {
         this.logger.LogInformation("Now listening on port {Port}", this.serverOptions.Port);
 
         this.tickRateService.Tick += this.Tick;
-        this.packetTask = Task.Run(async () => {
-            while (!this.packetCts.IsCancellationRequested) {
-                try {
-                    this.HandleMessages();
-                    await Task.Delay(1000 / this.serverOptions.TickRate);
-                } catch (Exception e) {
-                    this.logger.LogError(e, "Error while handling messages");
-                }
-            }
-        }, this.packetCts.Token);
         return Task.CompletedTask;
     }
 
     public override Task StopAsync(CancellationToken cancellationToken) {
         this.tickRateService.Tick -= this.Tick;
-
-        this.packetCts.Cancel();
-        this.packetTask?.Wait(cancellationToken);
 
         foreach (var id in this.clients.Keys) this.server?.CloseConnection(id);
         this.clients.Clear();
@@ -120,10 +101,7 @@ public class NetworkService : BackgroundService {
         this.QueueUpdate(stage, update, this.queuedAnimationUpdates);
 
     private void Tick() {
-        while (this.packetQueue.TryDequeue(out var packet)) {
-            var (connection, message) = packet;
-            if (this.clients.TryGetValue(connection, out var client)) client.HandlePacket(message);
-        }
+        this.HandleMessages();
 
         this.DispatchUpdate(updates => new ClientboundMessage {
             PositionUpdate = new ClientboundPositionUpdate {
@@ -145,24 +123,24 @@ public class NetworkService : BackgroundService {
     }
 
     private void HandleMessages() {
-        // Loop here so we can fetch as many messages as possible (if there's over MaxMessages messages)
-        while (true) {
-            this.server!.RunCallbacks();
-            var count = this.server.ReceiveMessagesOnPollGroup(this.pollGroup, this.messages, MaxMessages);
+        this.server!.RunCallbacks();
 
-            if (count > 0) {
-                for (var i = 0; i < count; i++) {
-                    ref var netMessage = ref messages[i];
-                    var data = new byte[netMessage.length];
-                    Marshal.Copy(netMessage.data, data, 0, netMessage.length);
+        const int maxMessages = 256;
+        var messages = new NetworkingMessage[maxMessages];
+        var count = this.server.ReceiveMessagesOnPollGroup(this.pollGroup, messages, maxMessages);
 
-                    var packet = ServerboundMessage.Parser.ParseFrom(data);
-                    if (packet is not null) this.packetQueue.Enqueue((netMessage.connection, packet));
+        if (count > 0) {
+            for (var i = 0; i < count; i++) {
+                ref var netMessage = ref messages[i];
+                var data = new byte[netMessage.length];
+                Marshal.Copy(netMessage.data, data, 0, netMessage.length);
 
-                    netMessage.Destroy();
+                var packet = ServerboundMessage.Parser.ParseFrom(data);
+                if (packet is not null && this.clients.TryGetValue(netMessage.connection, out var client)) {
+                    client.HandlePacket(packet);
                 }
-            } else {
-                break;
+
+                netMessage.Destroy();
             }
         }
     }

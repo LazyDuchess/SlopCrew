@@ -6,7 +6,7 @@ namespace SlopCrew.Common;
 public class Constants {
     public const uint NetworkVersion = 5;
     public const int MaxCustomCharacterInfo = 5;
-    public const int MaxCustomPacketSize = 512;
+    public const int MaxCustomPacketSize = 100000;
 
     public const string DefaultName = "Big Slopper";
     public const string CensoredName = "Punished Slopper";

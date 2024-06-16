@@ -159,12 +159,21 @@ public class NetworkClient : IDisposable {
                 if (customPacket.Data.Length > Constants.MaxCustomPacketSize
                     || customPacket.Id.Length > Constants.MaxCustomPacketSize) return;
 
+                var packetTags = CustomPacketExtensions.GetTagsFromPacketID(customPacket.Id);
+                var sendFlags = SendFlags.Reliable;
+
+                if (packetTags.TryGetValue("f", out var flags)) {
+                        if (int.TryParse(flags, out var parsedFlags)) {
+                            sendFlags = (SendFlags)parsedFlags;
+                        }
+                }
+
                 this.networkService.SendToStage(this.Stage.Value, new ClientboundMessage {
                     CustomPacket = new ClientboundCustomPacket {
                         PlayerId = this.Player.Id,
                         Packet = customPacket
                     }
-                }, exclude: this.Player.Id);
+                }, exclude: this.Player.Id, sendFlags);
                 break;
             }
 

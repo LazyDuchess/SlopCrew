@@ -156,6 +156,8 @@ public class NetworkClient : IDisposable {
             case ServerboundMessage.MessageOneofCase.CustomPacket: {
                 if (this.Player is null || this.Stage is null) return;
                 var customPacket = packet.CustomPacket.Packet;
+                    if (customPacket.Id.ToLowerInvariant().Contains("carjack"))
+                        return;
                 if (customPacket.Data.Length > Constants.MaxCustomPacketSize
                     || customPacket.Id.Length > Constants.MaxCustomPacketSize) return;
 
